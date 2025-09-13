@@ -1,0 +1,14 @@
+fastmcp 
+psycopg2-binary 
+pymysql 
+snowflake-connector-python
+python-dotenv 
+langchain-openai 
+langchain-mcp-adapters 
+langgraph 
+langgraph-supervisor
+langchain-groq
+pandas
+openpyxl
+sqlalchemy
+mysql-connector-python

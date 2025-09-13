@@ -1,0 +1,22 @@
+[project]
+name = "query-mcp"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastmcp>=2.12.2",
+    "langchain-groq>=0.3.8",
+    "langchain-mcp-adapters>=0.1.9",
+    "langchain-openai>=0.3.33",
+    "langgraph>=0.6.7",
+    "langgraph-supervisor>=0.0.29",
+    "mysql-connector-python>=9.4.0",
+    "openpyxl>=3.1.5",
+    "pandas>=2.3.2",
+    "psycopg2-binary>=2.9.10",
+    "pymysql>=1.1.2",
+    "python-dotenv>=1.1.1",
+    "snowflake-connector-python>=3.17.3",
+    "sqlalchemy>=2.0.43",
+]
