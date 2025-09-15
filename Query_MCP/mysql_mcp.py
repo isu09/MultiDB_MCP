@@ -134,6 +134,16 @@ def create_table_in_db(create_query: str, df: pd.DataFrame, table_name: str):
 # -----------------------------
 # MCP TOOLS
 # -----------------------------
+#------get_schema_file---------------
+@mysql_mcp.tool(
+    name="get_schema_file",
+    description="Get the schema from the file"
+)
+def get_schema(file_path: str):
+    schema = get_file_schema(file_path)
+    return schema
+
+
 #-----create_table-------------
 @mysql_mcp.tool(
     name="create_table",
@@ -143,7 +153,7 @@ def create_table(file_path: str, table_name: str):
     df, schema = get_file_schema(file_path)
     create_query = generate_sql("create", table_name, schema)
     message = create_table_in_db(create_query,df,table_name)
-    return message
+    return message,schema
 
 
 #------insert_data------------

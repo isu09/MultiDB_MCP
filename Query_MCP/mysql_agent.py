@@ -28,7 +28,7 @@ async def main():
     tools = await client.get_tools()
 # ----------------------------- Create React Agent -----------------------------
     mysql_agent = create_react_agent(name= "mysql_agent",model=model, 
-                               tools=[t for t in tools if t.name in ["create_table","insert_data","select_data","upsert_data"]],
+                               tools=[t for t in tools if t.name in ["get_schema","create_table","insert_data","select_data","upsert_data"]],
                                prompt="""You are MYSQL_AGENT, an expert assistant for managing MySQL databases via MCP tools.
 Your responsibilities are:
 
