@@ -116,20 +116,21 @@ def execute_query(sql: str, params=None, fetch=False):
             return {"status": "success", "query": sql}
 
 
-def create_table_in_db(create_query: str, df: pd.DataFrame, table_name: str):
+def create_table_in_db(create_query: str, df: pd.DataFrame, table_name: str,schema):
     engine = create_engine(mysql_conn)
     with engine.begin() as conn:  # connection open & auto-commit
         # Create table
         
         conn.execute(text(create_query))
         
-        # Insert data row by row
+        # LLM generates INSERT template
+        insert_sql = generate_sql("insert", table_name, schema)
+        
+        
+        # Insert rows
         for _, row in df.iterrows():
-            columns_formatted = ', '.join(f'`{col}`' for col in df.columns)
-            placeholders = ', '.join(f':{col}' for col in df.columns)
-            insert_sql = f'INSERT INTO `{table_name}` ({columns_formatted}) VALUES ({placeholders})'
             conn.execute(text(insert_sql), row.to_dict())
-
+    
     return {"status": "success", "message": f"Table '{table_name}' created and data inserted successfully!"}
 # -----------------------------
 # MCP TOOLS
@@ -140,7 +141,7 @@ def create_table_in_db(create_query: str, df: pd.DataFrame, table_name: str):
     description="Get the schema from the file"
 )
 def get_schema(file_path: str):
-    df,schema = get_file_schema(file_path)
+    schema = get_file_schema(file_path)
     return schema
 
 
@@ -152,7 +153,7 @@ def get_schema(file_path: str):
 def create_table(file_path: str, table_name: str):
     df, schema = get_file_schema(file_path)
     create_query = generate_sql("create", table_name, schema)
-    message = create_table_in_db(create_query,df,table_name)
+    message = create_table_in_db(create_query,df,table_name,schema)
     return message,schema
 
 
@@ -206,16 +207,19 @@ def upsert_data(file_path: str, table_name: str):
     # Step 2: Generate upsert query template using LLM
     upsert_sql_template = generate_sql("insert", table_name, schema, upsert=True)
     
-    # Step 3: Return the SQL template
+   # Step 3: Connect to database and execute UPSERT for each row
+    engine = create_engine(mysql_conn)  # or MySQL connection string
+    with engine.begin() as conn:
+        for _, row in df.iterrows():
+            conn.execute(text(upsert_sql_template), row.to_dict())
+    
     return {
         "status": "success",
-        "upsert_sql_template": upsert_sql_template,
-        "message": f"Generated UPSERT SQL template for table '{table_name}' without inserting data."
+        "message": f"All rows from '{file_path}' upserted into table '{table_name}' successfully!"
     }
 # -----------------------------
 # START MCP SERVER
 # -----------------------------
 if __name__ == "__main__":
     print("Starting Database MCP server...", file=sys.stderr)
-
     mysql_mcp.run()
