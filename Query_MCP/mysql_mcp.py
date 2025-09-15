@@ -195,7 +195,7 @@ def select_data(table_name: str):
     return execute_query(select_sql, fetch=True)
 
 
-#------generate_upsert_query------------
+#-----upsert_data------------
 @mysql_mcp.tool(
     name="upsert_data",
     description="Generate an UPSERT (INSERT ... ON DUPLICATE KEY UPDATE) SQL template from a file schema. No actual data inserted."
