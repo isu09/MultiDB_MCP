@@ -140,7 +140,7 @@ def create_table_in_db(create_query: str, df: pd.DataFrame, table_name: str):
     description="Get the schema from the file"
 )
 def get_schema(file_path: str):
-    schema = get_file_schema(file_path)
+    df,schema = get_file_schema(file_path)
     return schema
 
 
@@ -217,4 +217,5 @@ def upsert_data(file_path: str, table_name: str):
 # -----------------------------
 if __name__ == "__main__":
     print("Starting Database MCP server...", file=sys.stderr)
+
     mysql_mcp.run()
