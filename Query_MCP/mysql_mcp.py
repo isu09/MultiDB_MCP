@@ -6,11 +6,12 @@ from openai import OpenAI
 import re
 from fastmcp import FastMCP
 import sys
+import json
 
 mysql_mcp = FastMCP("MYSQL_MCP")
 
 load_dotenv()
-db_type ="mysql"
+#db_type ="mysql"
 
 # -----------------------------
 # CONFIG
@@ -50,7 +51,7 @@ def extract_sql_from_llm_response(response_text):
         return sql
 
 
-def generate_sql(query_type: str, table_name: str, schema: dict = None,upsert:bool=False):
+def generate_sql(query_type: str, table_name: str, schema: dict = None,upsert:bool=False , db_type = "mysql"):
     """
     Fully LLM-driven SQL generation: CREATE, INSERT, SELECT.
     No SQL is hardcoded in Python.
@@ -72,7 +73,9 @@ def generate_sql(query_type: str, table_name: str, schema: dict = None,upsert:bo
         "For CREATE, include IF NOT EXISTS and use best-fit MySQL datatypes.",
         "If possible, generate INSERT ... ON DUPLICATE KEY UPDATE to handle existing rows."
         "For UPSERT (if upsert=True), generate INSERT ... ON DUPLICATE KEY UPDATE with placeholders, no actual data values."
-    ]
+        "For counting rows, generate a query that returns the total number of rows in the table",
+        "For describing schema, generate a query that returns column names and data types"
+        "For CHECK_EXISTENCE, generate a query that returns 1 if the table exists, 0 if not."]
     rules = [r for r in rules if r]  # Remove None values
 
     # Build the prompt
@@ -126,12 +129,13 @@ def create_table_in_db(create_query: str, df: pd.DataFrame, table_name: str,sche
         # LLM generates INSERT template
         insert_sql = generate_sql("insert", table_name, schema)
         
-        
+        rows_inserted =0
         # Insert rows
         for _, row in df.iterrows():
             conn.execute(text(insert_sql), row.to_dict())
+            rows_inserted +=1
     
-    return {"status": "success", "message": f"Table '{table_name}' created and data inserted successfully!"}
+    return insert_sql, rows_inserted
 # -----------------------------
 # MCP TOOLS
 # -----------------------------
@@ -150,11 +154,19 @@ def get_schema(file_path: str):
     name="create_table",
     description="Generate and execute a CREATE TABLE query from file schema."
 )
-def create_table(file_path: str, table_name: str):
+def create_table(file_path: str, table_name: str , db_type = "mysql"):
     df, schema = get_file_schema(file_path)
-    create_query = generate_sql("create", table_name, schema)
-    message = create_table_in_db(create_query,df,table_name,schema)
-    return message,schema
+    
+    create_query = generate_sql("create", table_name, schema,db_type)
+    insert_query, rows_inserted = create_table_in_db(create_query,df,table_name,schema)
+    result =  {
+        "status": "success",
+        "create_query": create_query.strip().split("\n"),
+        "insert_query": insert_query.strip().split("\n"),
+        "rows_inserted": rows_inserted,
+        "message": f"Table '{table_name}' created and {rows_inserted} rows inserted successfully!"
+    }
+    return json.dumps(result, indent=4)
 
 
 #------insert_data------------
@@ -162,17 +174,18 @@ def create_table(file_path: str, table_name: str):
     name="insert_data",
     description="Generate an INSERT query template (no values) and insert new rows."
 )
-def insert_data(file_path: str, table_name: str):
+def insert_data(file_path: str, table_name: str,db_type = "mysql"):
     df, schema = get_file_schema(file_path)
     
     # LLM generates INSERT template
-    insert_sql = generate_sql("insert", table_name, schema)
+    insert_sql = generate_sql("insert", table_name, schema,db_type)
     
     # LLM generates SELECT to check existing rows
     select_sql = generate_sql("select", table_name)
     
     engine = create_engine(mysql_conn)
     with engine.begin() as conn:
+        rows_inserted = 0
         existing_df = pd.read_sql(select_sql, conn)
         new_rows = df[~df.apply(tuple, axis=1).isin(existing_df.apply(tuple, axis=1))]
         
@@ -182,8 +195,15 @@ def insert_data(file_path: str, table_name: str):
         # Execute INSERT template with real data
         for _, row in new_rows.iterrows():
             conn.execute(text(insert_sql), row.to_dict())
+            rows_inserted += 1
         
-        return {"status": "updated", "message": f"Inserted {len(new_rows)} new rows into '{table_name}'."}
+        result= {
+            "status": "updated",
+            "message": f"Inserted {rows_inserted} new rows into '{table_name}'.",
+            "insert_query": insert_sql.strip(),
+            "rows_inserted": rows_inserted
+        }
+        return json.dumps(result, indent=4)
 
 #---------select_data------
 @mysql_mcp.tool(
@@ -191,16 +211,38 @@ def insert_data(file_path: str, table_name: str):
     description="Generate and execute a SELECT query to return all rows."
 )
 def select_data(table_name: str):
-    select_sql = generate_sql("select", table_name)
-    return execute_query(select_sql, fetch=True)
+    # Generate schema dynamically using LLM
+    # You can ask LLM to give column names/types for the table
+    schema_sql = generate_sql("describe", table_name)  # LLM-driven "DESCRIBE" equivalent
+    engine = create_engine(mysql_conn)
+    with engine.begin() as conn:
+        schema_result = conn.execute(text(schema_sql))
+        schema = [dict(row._mapping) for row in schema_result]  # List of dicts with column info
 
+    # Generate SELECT query dynamically using LLM
+    select_sql = generate_sql("select", table_name, schema={col["column_name"]: col["data_type"] for col in schema})
+    sample_rows = execute_query(select_sql, fetch=True)  # execute_query will limit to 10 rows
+
+    # Generate COUNT query dynamically using LLM
+    count_sql = generate_sql("count", table_name)
+    with engine.begin() as conn:
+        total_rows = conn.execute(text(count_sql)).scalar()
+
+    return {
+        "status": "success",
+        "select query": select_sql,
+        "count query" : count_sql,
+        "total_rows": total_rows,
+        "returned_rows": len(sample_rows),
+        "data": sample_rows
+    }
 
 #-----upsert_data------------
 @mysql_mcp.tool(
     name="upsert_data",
     description="Generate an UPSERT (INSERT ... ON DUPLICATE KEY UPDATE) SQL template from a file schema. No actual data inserted."
 )
-def upsert_data(file_path: str, table_name: str):
+def upsert_data(file_path: str, table_name: str ):
     # Step 1: Read file and get schema
     df, schema = get_file_schema(file_path)
     
@@ -209,14 +251,18 @@ def upsert_data(file_path: str, table_name: str):
     
    # Step 3: Connect to database and execute UPSERT for each row
     engine = create_engine(mysql_conn)  # or MySQL connection string
+
     with engine.begin() as conn:
         for _, row in df.iterrows():
             conn.execute(text(upsert_sql_template), row.to_dict())
+            
     
-    return {
+    result = {
         "status": "success",
-        "message": f"All rows from '{file_path}' upserted into table '{table_name}' successfully!"
+        "upsert_sql_template": upsert_sql_template,
+        "message": f"Updated new rows into '{table_name}'."
     }
+    return json.dumps(result, indent=4)
 # -----------------------------
 # START MCP SERVER
 # -----------------------------

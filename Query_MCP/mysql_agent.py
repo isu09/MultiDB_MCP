@@ -13,8 +13,10 @@ os.environ["OPENAI_API_KEY"] = os.getenv("OPENAI_API_KEY")
 
 # --- Setup LLM (OpenAI GPT model) ---
 model = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+mysql_agent = None  # placeholder
 
-async def main():
+async def init_mysql():
+    global mysql_agent
     # ---- MCP client setup ----
     client = MultiServerMCPClient(
         {
@@ -87,4 +89,4 @@ Response: Call `select_table` with table_name="stocks2025""")
         chat_history.append(("ai", response))
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(init_mysql())
