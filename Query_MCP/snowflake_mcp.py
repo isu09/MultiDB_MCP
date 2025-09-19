@@ -19,7 +19,7 @@ snowflake_mcp = FastMCP("SNOWFLAKE_MCP")
 snowflake_conn = os.getenv("snowflake_url")
 
 openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-db_type = "snowflake"
+
 # -----------------------------
 # HELPER FUNCTIONS (from your code)
 # -----------------------------
@@ -52,7 +52,7 @@ def extract_sql_from_llm_response(response_text):
         return sql
 
 
-def generate_sql(query_type: str, table_name: str, schema: dict = None,upsert:bool=False , db_type = "snowflake"):
+def generate_sql(query_type: str, table_name: str, schema: dict = None,upsert:bool=False ):
     """
         Fully LLM-driven SQL generation for Snowflake:
     CREATE, INSERT, SELECT, COUNT, DESCRIBE, MERGE (UPSERT).
@@ -65,7 +65,7 @@ def generate_sql(query_type: str, table_name: str, schema: dict = None,upsert:bo
         'For CREATE, include IF NOT EXISTS with proper Snowflake types.',
         'For COUNT, generate SELECT COUNT(*) query.',
         'For DESCRIBE, generate query to return column names and data types.',
-        'For UPSERT in Snowflake, always generate a MERGE INTO statement.',
+        'For UPSERT in SNOWFLAKE , always generate a MERGE INTO statement.',
         'Do not use MySQL-specific syntax like ON DUPLICATE KEY UPDATE.',
         'Ensure all generated SQL is compatible with Snowflake.'
     ]
@@ -98,23 +98,23 @@ def execute_query(sql: str, params=None, fetch=False):
             return {"status": "success", "query": sql}
 
 
-def create_table_in_db(create_query: str, df: pd.DataFrame, table_name: str,schema):
-    engine = create_engine(snowflake_conn)
-    with engine.begin() as conn:  # connection open & auto-commit
-        # Create table
+# def create_table_in_db(create_query: str, df: pd.DataFrame, table_name: str,schema):
+#     engine = create_engine(snowflake_conn)
+#     with engine.begin() as conn:  # connection open & auto-commit
+#         # Create table
         
-        conn.execute(text(create_query))
+#         conn.execute(text(create_query))
         
-        # LLM generates INSERT template
-        insert_sql = generate_sql("insert", table_name, schema)
+#         # LLM generates INSERT template
+#         insert_sql = generate_sql("insert", table_name, schema)
         
-        rows_inserted =0
-        # Insert rows
-        for _, row in df.iterrows():
-            conn.execute(text(insert_sql), row.to_dict())
-            rows_inserted +=1
+#         rows_inserted =0
+#         # Insert rows
+#         for _, row in df.iterrows():
+#             conn.execute(text(insert_sql), row.to_dict())
+#             rows_inserted +=1
     
-    return insert_sql, rows_inserted
+#     return insert_sql, rows_inserted
 # -----------------------------
 # MCP TOOLS
 # -----------------------------
@@ -133,7 +133,7 @@ def get_schema(file_path: str):
     name="create_table",
     description="Generate and execute a CREATE TABLE query from file schema."
 )
-def create_table(file_path: str, table_name: str , db_type = "snowflake"):
+def create_table(file_path: str, table_name: str ):
     df, schema = get_file_schema(file_path)
     engine = create_engine(snowflake_conn)
     # Step 1: Check if table exists dynamically using LLM
@@ -149,53 +149,57 @@ def create_table(file_path: str, table_name: str , db_type = "snowflake"):
     except:
         # Table does not exist → proceed
         pass
-    create_query = generate_sql("create", table_name, schema,db_type)
-    insert_query, rows_inserted = create_table_in_db(create_query,df,table_name,schema)
+    create_query = generate_sql("create", table_name, schema)
+    engine = create_engine(snowflake_conn)
+    with engine.begin() as conn:  # connection open & auto-commit
+        # Create table
+        
+        conn.execute(text(create_query))
     result =  {
         "status": "success",
         "create_query": create_query.strip().split("\n"),
-        "insert_query": insert_query.strip().split("\n"),
-        "rows_inserted": rows_inserted,
-        "message": f"Table '{table_name}' created and {rows_inserted} rows inserted successfully!"
+        
+        
+        "message": f"Table '{table_name}' created successfully!"
     }
     return json.dumps(result, indent=4)
 
 
-#------insert_data------------
-@snowflake_mcp.tool(
-    name="insert_data",
-    description="Generate an INSERT query template (no values) and insert new rows."
-)
-def insert_data(file_path: str, table_name: str,db_type = "snowflake"):
-    df, schema = get_file_schema(file_path)
+# #------insert_data------------
+# @snowflake_mcp.tool(
+#     name="insert_data",
+#     description="Generate an INSERT query template (no values) and insert new rows."
+# )
+# def insert_data(file_path: str, table_name: str,db_type = "snowflake"):
+#     df, schema = get_file_schema(file_path)
     
-    # LLM generates INSERT template
-    insert_sql = generate_sql("insert", table_name, schema,db_type)
+#     # LLM generates INSERT template
+#     insert_sql = generate_sql("insert", table_name, schema,db_type)
     
-    # LLM generates SELECT to check existing rows
-    select_sql = generate_sql("select", table_name)
+#     # LLM generates SELECT to check existing rows
+#     select_sql = generate_sql("select", table_name)
     
-    engine = create_engine(snowflake_conn)
-    with engine.begin() as conn:
-        rows_inserted = 0
-        existing_df = pd.read_sql(select_sql, conn)
-        new_rows = df[~df.apply(tuple, axis=1).isin(existing_df.apply(tuple, axis=1))]
+#     engine = create_engine(snowflake_conn)
+#     with engine.begin() as conn:
+#         rows_inserted = 0
+#         existing_df = pd.read_sql(select_sql, conn)
+#         new_rows = df[~df.apply(tuple, axis=1).isin(existing_df.apply(tuple, axis=1))]
         
-        if new_rows.empty:
-            return {"status": "exists", "message": f"No new rows to insert into '{table_name}'."}
+#         if new_rows.empty:
+#             return {"status": "exists", "message": f"No new rows to insert into '{table_name}'."}
         
-        # Execute INSERT template with real data
-        for _, row in new_rows.iterrows():
-            conn.execute(text(insert_sql), row.to_dict())
-            rows_inserted += 1
+#         # Execute INSERT template with real data
+#         for _, row in new_rows.iterrows():
+#             conn.execute(text(insert_sql), row.to_dict())
+#             rows_inserted += 1
         
-        result= {
-            "status": "updated",
-            "message": f"Inserted {rows_inserted} new rows into '{table_name}'.",
-            "insert_query": insert_sql.strip(),
-            "rows_inserted": rows_inserted
-        }
-        return json.dumps(result, indent=4)
+#         result= {
+#             "status": "updated",
+#             "message": f"Inserted {rows_inserted} new rows into '{table_name}'.",
+#             "insert_query": insert_sql.strip(),
+#             "rows_inserted": rows_inserted
+#         }
+#         return json.dumps(result, indent=4)
 
 #---------select_data------
 @snowflake_mcp.tool(
@@ -239,7 +243,7 @@ def upsert_data(file_path: str, table_name: str ):
     df, schema = get_file_schema(file_path)
     
     # Step 2: Generate upsert query template using LLM
-    upsert_sql_template = generate_sql("merge", table_name, schema, db_type="snowflake")
+    upsert_sql_template = generate_sql("merge", table_name, schema)
     
    # Step 3: Connect to database and execute UPSERT for each row
     engine = create_engine(snowflake_conn)  # or snowflake connection string

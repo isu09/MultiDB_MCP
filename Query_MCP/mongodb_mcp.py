@@ -7,11 +7,11 @@ import sys
 import json
 from motor.motor_asyncio import AsyncIOMotorClient
 import re
-
+from typing import Optional
 mongodb_mcp = FastMCP("MONGODB_MCP",instructions="""
         MongoDB MCP Server
         Tools:
-        - get_schema
+        
         - create_collection
         - list_collection
         - upsert_document (insert new documents only)
@@ -67,16 +67,37 @@ async def get_schema(file_path: str):
 
 # Create a new collection
 @mongodb_mcp.tool(name="create_collection", description="Create a collection in MongoDB")
-async def create_collection(collection_name: str):
+async def create_collection(collection_name: str, file_path: Optional[str] = None):
     try:
+        df = pd.DataFrame()  # empty by default
+
+        # 1️⃣ Read file into DataFrame if provided
+        if file_path:
+            if file_path.endswith(".csv"):
+                df = pd.read_csv(file_path)
+            elif file_path.endswith((".xls", ".xlsx")):
+                df = pd.read_excel(file_path)
+            elif file_path.endswith(".json"):
+                df = pd.read_json(file_path)
+            else:
+                return {"error": "Unsupported file type. Use CSV, XLSX, or JSON."}
+
+        # 2️⃣ Check if collection exists
         existing_collections = await mongodb_conn.list_collection_names()
         if collection_name in existing_collections:
             return {"message": f"Collection '{collection_name}' already exists."}
-        await mongodb_conn.create_collection(collection_name)
-        return {"message": f"Collection '{collection_name}' created successfully."}
+
+        # 3️⃣ Create collection
+        collection = await mongodb_conn.create_collection(collection_name)
+
+        # 4️⃣ Insert data if file was provided and has rows
+        if not df.empty:
+            await collection.insert_many(df.to_dict(orient="records"))
+
+        return {"message": f"Collection '{collection_name}' created successfully with {len(df)} documents."}
+
     except Exception as e:
         return {"error": str(e)}
-
 # List all collections
 @mongodb_mcp.tool(name="list_collection", description="List all collections in MongoDB")
 async def list_collection():
@@ -88,12 +109,16 @@ async def list_collection():
     except Exception as e:
         return {"error": str(e)}
 
-# Insert only new documents from a file
 @mongodb_mcp.tool(
     name="upsert_document",
-    description="Insert only new documents from JSON/CSV/TSV/Excel files into MongoDB"
+    description="Insert or update documents from JSON/CSV/TSV/Excel files into MongoDB (auto-detect unique keys)"
 )
-async def upsert_document(collection_name: str, file_path: str):
+async def upsert_document(collection_name: str, file_path: str, unique_keys: list = None):
+    """
+    collection_name: MongoDB collection to insert/update into
+    file_path: Path to CSV/TSV/Excel/JSON file
+    unique_keys: Optional list of column names to identify existing documents
+    """
     try:
         collection = mongodb_conn[collection_name]
 
@@ -113,15 +138,36 @@ async def upsert_document(collection_name: str, file_path: str):
         df.columns = df.columns.str.strip().str.replace(" ", "_")
         documents = df.to_dict(orient="records")
 
-        # ---------- Insert new documents ----------
+        if not documents:
+            return {"message": "No documents to insert."}
+
+        # ---------- Determine unique keys ----------
+        if not unique_keys or not all(k in df.columns for k in unique_keys):
+            # Default: first column as unique key
+            unique_keys = [df.columns[0]]
+
+        # ---------- Upsert documents ----------
         inserted = 0
+        updated = 0
         for doc in documents:
-            exists = await collection.find_one(doc)
-            if not exists:
-                await collection.insert_one(doc)
+            filter_query = {k: doc[k] for k in unique_keys if k in doc}
+            if not filter_query:
+                # fallback: use entire document as filter
+                filter_query = doc
+
+            result = await collection.update_one(
+                filter_query,
+                {"$set": doc},
+                upsert=True
+            )
+            if result.matched_count:
+                updated += 1
+            else:
                 inserted += 1
 
-        return {"message": f"{inserted} new document(s) inserted in '{collection_name}'."}
+        return {
+            "message": f"{inserted} new document(s) inserted, {updated} document(s) updated in '{collection_name}'."
+        }
 
     except Exception as e:
         return {"error": str(e)}

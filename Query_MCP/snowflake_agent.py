@@ -30,7 +30,7 @@ async def init_snowflake():
     tools = await client.get_tools()
 # ----------------------------- Create React Agent -----------------------------
     snowflake_agent = create_react_agent(name= "snowflake_agent",model=model, 
-                               tools=[t for t in tools if t.name in ["get_schema_file","create_table","insert_data","select_data","upsert_data"]],
+                               tools=[t for t in tools if t.name in ["get_schema_file","create_table","select_data","upsert_data"]],
                                prompt="""You are SNOWFLAKE_AGENT, an expert assistant for managing SNOWFLAKE databases via MCP tools.
 Your responsibilities are:
 
